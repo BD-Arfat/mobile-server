@@ -10,6 +10,7 @@ require('dotenv').config();
 app.use(cors());
 app.use(express.json());
 const jwt = require('jsonwebtoken')
+const stripe = require("stripe")(process.env.STRIPE_SECRET);
 
 //////////////////////
 
@@ -49,6 +50,7 @@ async function run() {
     const productCollection = client.db('mobile').collection('products');
     const orderCollection = client.db('mobile').collection('order');
     const usersCollection = client.db('mobile').collection('users');
+    const paymentCollection = client.db('mobile').collection('payment');
 
     app.get('/product', async (req, res) => {
       const query = {};
@@ -71,6 +73,13 @@ async function run() {
       const result = await orderCollection.insertOne(user);
       res.send(result)
     });
+
+    app.get('/orders/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await orderCollection.findOne(query);
+      res.send(result)
+    })
 
     app.get('/order', async (req, res) => {
       const query = {};
@@ -131,9 +140,16 @@ async function run() {
 
     app.get('/users/admin/:email', async (req, res) => {
       const email = req.params.email;
-      const query = {email : email};
+      const query = { email: email };
       const user = await usersCollection.findOne(query);
       res.send({ isAdmin: user?.role === "admin" })
+    });
+
+    app.delete('/users/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await usersCollection.deleteOne(query);
+      res.send(result);
     })
 
     app.put('/users/admin/:id', verifyJWT, async (req, res) => {
@@ -156,8 +172,54 @@ async function run() {
       }
       const result = await usersCollection.updateOne(filter, updatedDoc, options);
       res.send(result)
-    })
+    });
 
+    // /////////////////////////////////////////
+
+    // ////////////////////////////////////////
+
+    app.post("/create-payment-intent", async (req, res) => {
+      const booking = req.body;
+      const price = booking.price;
+      const amount = price * 100;
+
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: "usd",
+        automatic_payment_methods: {
+          enabled: true,
+        },
+      });
+    
+      res.send({
+        clientSecret: paymentIntent.client_secret,
+      });
+
+      app.post('/payments', async(req, res)=>{
+        const payment = req.body;
+        const id = payment.bookingId;
+        const result = await paymentCollection.insertOne(payment);
+        const filter = {_id : new ObjectId(id)};
+        const updatedDoc = {
+          $set : {
+            paid : true,
+            transactionId : payment.transactionId
+          }
+        }
+        const updateResult = await orderCollection.updateOne(filter, updatedDoc, )
+        res.send(result)
+      });
+
+      // app.get('/payments', async(req, res)=>{
+      //   const query = {};
+      //   const cursor = paymentCollection.find(query);
+      //   const result = await cursor.toArray();
+      //   res.send(result)
+      // })
+
+
+    });
 
 
   } finally {
